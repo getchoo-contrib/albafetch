@@ -4,10 +4,16 @@
 
 #include <string.h>
 
+// just here to stop vscode from complaining about DT_DIR
+#ifndef __USE_MISC
+#define __USE_MISC
+#endif
+
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sqlite3.h>
 #include <sys/wait.h>
 
 // get the number of installed packages
@@ -28,7 +34,7 @@ int packages(char *dest) {
         strncat(path, "/var/lib/pacman/local", 256-strlen(path));
         if(_pkg_pacman && (dir = opendir(path)) != NULL) {
             while((entry = readdir(dir)) != NULL)
-                if(entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
+                if(entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..")!= 0)
                     ++count;
             closedir(dir);
 
@@ -42,24 +48,18 @@ int packages(char *dest) {
         if(getenv("PREFIX"))
             strncpy(path, getenv("PREFIX"), 255);
         strncat(path, "/var/lib/dpkg/status", 256-strlen(path));
-        if(_pkg_dpkg && (fp = fopen(path, "r")) != NULL) {   // alternatively, I could use "dpkg-query -f L -W" and strlen
-            fseek(fp, 0, SEEK_END);
-            size_t len = (size_t)ftell(fp);
-            rewind(fp);
 
-            char *dpkg_list = malloc(len);
-            dpkg_list[fread(dpkg_list, 1, len, fp) - 1] = 0;
+        if(_pkg_dpkg && (fp = fopen(path, "r")) != NULL) {
+            char line[512];
+            int count = 0;
 
-            fclose(fp);
-
-            count = 0;
-            // this will be wrong if some package does not have "\nInstalled-Size: "
-            // or if some package (for some reason) has it in the package description
-            while((dpkg_list = strstr(dpkg_list, "\nInstalled-Size: "))) {
-                ++count;
-                ++dpkg_list;
+            while(fgets(line, sizeof(line), fp)) {
+                // check if the line starts with "Package:"
+                if(strncmp(line, "Package:", 8) == 0) {
+                    ++count;
+                }
             }
-            free(dpkg_list);
+            fclose(fp);
 
             if(count) {
                 snprintf(buf, 256, "%u%s", count, _pkg_mgr ? " (dpkg)" : "");
@@ -68,19 +68,37 @@ int packages(char *dest) {
             }
         }
 
+        // could also use rpm APIs directly
         path[0] = 0;
         if(getenv("PREFIX"))
             strncpy(path, getenv("PREFIX"), 255);
         strncat(path, "/var/lib/rpm/rpmdb.sqlite", 256-strlen(path));
         if(_pkg_rpm && access(path, F_OK) == 0) {
-            char *args[] = {"sqlite3", path, "SELECT count(*) FROM Packages", NULL};
-            exec_cmd(str, 16, args);
+            sqlite3 *db;
+            sqlite3_stmt *stmt;
+            int count = 0;
 
-            if(str[0] != '0' && str[0]) {
-                snprintf(buf, 255 - strlen(buf), "%s%s%s", done ? ", " : "", str, _pkg_mgr ? " (rpm)" : "");
-                done = true;
-                strncat(dest, buf, 256 - strlen(dest));
+            if(sqlite3_open(path, &db) != SQLITE_OK)
+                goto skip;
+            if(sqlite3_prepare_v2(db, "SELECT count(*) FROM Packages", -1, &stmt, NULL) != SQLITE_OK) {
+                sqlite3_close(db);
+                goto skip;
             }
+
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                count = sqlite3_column_int(stmt, 0);
+
+                if(count > 0) {
+                    snprintf(buf, 255 - strlen(buf), "%s%s%s", done ? ", " : "", str, _pkg_mgr ? " (rpm)" : "");
+                    done = true;
+                    strncat(dest, buf, 256 - strlen(dest));
+                }
+            }
+
+            sqlite3_finalize(stmt);
+            sqlite3_close(db);
+
+            skip: ;
         }
 
         path[0] = 0;
@@ -119,6 +137,7 @@ int packages(char *dest) {
             }
         }
     #endif
+
 
     if(_pkg_brew && (access("/usr/local/bin/brew", F_OK) == 0 || access("/opt/homebrew/bin/brew", F_OK) == 0 || access("/bin/brew", F_OK) == 0)) {
         char *args[] = {"brew", "--cellar", NULL};
