@@ -6,8 +6,6 @@
 
 // TODO: rewrite config parsing from scratch
 
-/*
-
 // checks if the given character is between two " "
 bool is_in_string(const char *str, const char *place) {
     int count = 0;
@@ -53,8 +51,6 @@ char *skip_full(char *ptr) {
 
     return NULL;
 }
-
-*/
 
 // remove comments, aka from start to the end of the line
 void uncomment(char *str, const char start) {

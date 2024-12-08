@@ -332,3 +332,55 @@ void parse_config(const char *file, struct Module *modules, void **ascii_ptr, bo
 
     free(conf);
 }
+
+int parse_config_new(const char *file, struct Module *modules,
+                      void **ascii_ptr, bool *default_old,
+                      char *default_color, char *default_logo) {
+    FILE *fp = fopen(file, "r");
+    if(fp == NULL)
+        return -1;
+
+    fseek(fp, 0, SEEK_END);
+    size_t len = (size_t)ftell(fp);
+    rewind(fp);
+    
+    char *conf = malloc(len+1);
+    if(conf == NULL)
+        return -1;
+
+    conf[fread(conf, 1, len, fp)] = 0;
+    fclose(fp);
+
+    // remove comments
+    uncomment(conf, '#');
+    uncomment(conf, ';');
+
+    // not sure if this makes sense? reduces memory usage but hurts runtime
+    conf = realloc(conf, strlen(conf)+1);
+
+    char *line = conf;
+    char *end;
+
+    while((end = strchr(line, ','))) {
+        if(end > line) {
+            while(is_in_string(line, end) == true) {
+                end = strchr(end+1, ',');
+
+                if(end == NULL)
+                    break;
+            }
+        }
+
+        *end = 0;
+        line = skip_whites(line);
+        if(line == NULL)
+            break;
+
+        char *ptr1, *ptr2;
+        ptr1 = strchr(line, '=');
+        ptr2 = skip_full(line);
+
+        if(ptr2 != NULL && ptr1 > ptr2)
+            ptr1 = ptr2;
+    }
+}
